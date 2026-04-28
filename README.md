@@ -31,6 +31,9 @@ CloneTray can be configured via the `config.yml` file:
 ```yaml
 default_clone_base_dir: ~/Developer
 ide_app_name: Cursor # Visual Studio Code
+default_browser:      # leave empty to auto-detect the active browser
 ```
 
-Modify these values according to your preferences before starting the application.
+You can also change the default IDE and default browser at runtime from the
+tray menu under **Settings → Default IDE** and **Settings → Default Browser**.
+Changes are persisted back to `config.yml`.

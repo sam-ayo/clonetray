@@ -10,6 +10,24 @@ from git import Repo
 APP_NAME = "CloneRepo"
 ICON_FILE = None
 MENU_ITEM_CLONE = "Clone Repo..."
+MENU_ITEM_SETTINGS = "Settings"
+MENU_ITEM_DEFAULT_IDE = "Default IDE"
+MENU_ITEM_DEFAULT_BROWSER = "Default Browser"
+MENU_ITEM_IDE_CUSTOM = "Custom..."
+MENU_ITEM_BROWSER_AUTO = "Auto-detect"
+
+IDE_CHOICES = [
+    "Cursor",
+    "Visual Studio Code",
+    "Zed",
+    "Zed Preview",
+    "Zed Nightly",
+    "Sublime Text",
+    "Xcode",
+    "PyCharm",
+    "IntelliJ IDEA",
+    "WebStorm",
+]
 
 # Load configuration from config.yml
 CONFIG_FILE = Path(__file__).parent / "config.yml"
@@ -17,15 +35,23 @@ CONFIG_FILE = Path(__file__).parent / "config.yml"
 def load_config():
     try:
         with open(CONFIG_FILE, 'r') as file:
-            config = yaml.safe_load(file)
+            config = yaml.safe_load(file) or {}
             return config
     except Exception as e:
         print(f"Error loading config file: {e}", flush=True)
         return {}
 
+def save_config(config: dict):
+    try:
+        with open(CONFIG_FILE, 'w') as file:
+            yaml.safe_dump(config, file, sort_keys=False)
+    except Exception as e:
+        print(f"Error saving config file: {e}", flush=True)
+
 config = load_config()
 DEFAULT_CLONE_BASE_DIR = Path(config.get('default_clone_base_dir', '~/Developer').replace('~', str(Path.home())))
 IDE_APP_NAME = config.get('ide_app_name', 'Cursor')
+DEFAULT_BROWSER = config.get('default_browser')  # None means auto-detect
 
 IDE_OPEN_COMMAND_TEMPLATE = 'open -a "{app_name}" "{directory}"'
 
@@ -81,12 +107,99 @@ end tell
     "Firefox": 'tell application "Firefox" to get URL of active tab of front window',
     "Brave Browser": 'tell application "Brave Browser" to get URL of active tab of front window',
     "Microsoft Edge": 'tell application "Microsoft Edge" to get URL of active tab of front window',
+    "Helium": 'tell application "Helium" to get URL of active tab of front window',
 }
 
 
 class RepoTrayApp(rumps.App):
     def __init__(self):
         super().__init__(APP_NAME, icon=ICON_FILE, menu=[MENU_ITEM_CLONE])
+        self._ide_items: dict[str, rumps.MenuItem] = {}
+        self._browser_items: dict[str, rumps.MenuItem] = {}
+        self._build_settings_menu()
+
+    def _build_settings_menu(self):
+        ide_menu = rumps.MenuItem(MENU_ITEM_DEFAULT_IDE)
+        for name in IDE_CHOICES:
+            item = rumps.MenuItem(name, callback=self._make_ide_callback(name))
+            item.state = 1 if name == IDE_APP_NAME else 0
+            self._ide_items[name] = item
+            ide_menu.add(item)
+        # If the configured IDE isn't in our preset list, add it so it shows as selected.
+        if IDE_APP_NAME not in self._ide_items:
+            item = rumps.MenuItem(IDE_APP_NAME, callback=self._make_ide_callback(IDE_APP_NAME))
+            item.state = 1
+            self._ide_items[IDE_APP_NAME] = item
+            ide_menu.add(item)
+        ide_menu.add(rumps.separator)
+        ide_menu.add(rumps.MenuItem(MENU_ITEM_IDE_CUSTOM, callback=self._set_custom_ide))
+
+        browser_menu = rumps.MenuItem(MENU_ITEM_DEFAULT_BROWSER)
+        auto_item = rumps.MenuItem(MENU_ITEM_BROWSER_AUTO, callback=self._make_browser_callback(None))
+        auto_item.state = 1 if not DEFAULT_BROWSER else 0
+        self._browser_items[MENU_ITEM_BROWSER_AUTO] = auto_item
+        browser_menu.add(auto_item)
+        browser_menu.add(rumps.separator)
+        for name in BROWSER_SCRIPTS.keys():
+            item = rumps.MenuItem(name, callback=self._make_browser_callback(name))
+            item.state = 1 if name == DEFAULT_BROWSER else 0
+            self._browser_items[name] = item
+            browser_menu.add(item)
+
+        settings_menu = rumps.MenuItem(MENU_ITEM_SETTINGS)
+        settings_menu.add(ide_menu)
+        settings_menu.add(browser_menu)
+        self.menu.add(settings_menu)
+
+    def _make_ide_callback(self, name: str):
+        def callback(_):
+            self._set_ide(name)
+        return callback
+
+    def _make_browser_callback(self, name: str | None):
+        def callback(_):
+            self._set_browser(name)
+        return callback
+
+    def _set_ide(self, name: str):
+        global IDE_APP_NAME
+        IDE_APP_NAME = name
+        for item_name, item in self._ide_items.items():
+            item.state = 1 if item_name == name else 0
+        config['ide_app_name'] = name
+        save_config(config)
+        print(f"Default IDE set to: {name}", flush=True)
+
+    def _set_custom_ide(self, _):
+        response = rumps.Window(
+            title="Set Default IDE",
+            message="Enter the application name (as it appears in /Applications):",
+            default_text=IDE_APP_NAME,
+            ok="Save",
+            cancel="Cancel",
+        ).run()
+        if response.clicked and response.text.strip():
+            name = response.text.strip()
+            if name not in self._ide_items:
+                item = rumps.MenuItem(name, callback=self._make_ide_callback(name))
+                self._ide_items[name] = item
+                # Insert before the separator + Custom... entry.
+                ide_menu = self.menu[MENU_ITEM_SETTINGS][MENU_ITEM_DEFAULT_IDE]
+                ide_menu.insert_before(MENU_ITEM_IDE_CUSTOM, item)
+            self._set_ide(name)
+
+    def _set_browser(self, name: str | None):
+        global DEFAULT_BROWSER
+        DEFAULT_BROWSER = name
+        selected_key = name if name else MENU_ITEM_BROWSER_AUTO
+        for item_name, item in self._browser_items.items():
+            item.state = 1 if item_name == selected_key else 0
+        if name is None:
+            config.pop('default_browser', None)
+        else:
+            config['default_browser'] = name
+        save_config(config)
+        print(f"Default browser set to: {name or 'Auto-detect'}", flush=True)
 
     @rumps.clicked(MENU_ITEM_CLONE)
     def clone_repo(self, _):
@@ -193,9 +306,13 @@ class RepoTrayApp(rumps.App):
 
     def detect_github_url(self) -> str | None:
         pattern = GITHUB_URL_PATTERN
-        
-        # First try to get URL from active browser
-        active_browser = self.get_active_browser()
+
+        # Use configured default browser if set; otherwise auto-detect the active one.
+        if DEFAULT_BROWSER and DEFAULT_BROWSER in BROWSER_SCRIPTS:
+            active_browser = DEFAULT_BROWSER
+            print(f"Using configured default browser: {active_browser}", flush=True)
+        else:
+            active_browser = self.get_active_browser()
         if active_browser and active_browser in BROWSER_SCRIPTS:
             try:
                 script = BROWSER_SCRIPTS[active_browser]
