@@ -25,7 +25,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       update_site: ${{ steps.secrets.outputs.update_site }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Resolve version
         id: version
@@ -42,6 +42,33 @@ jobs:
       - name: Check for website token
         id: secrets
         run: echo "update_site=${{ secrets.SITE_REPO_TOKEN != '' }}" >>"$GITHUB_OUTPUT"
+
+      # Without this, a missing secret surfaces as a cryptic `security import` error.
+      - name: Check signing secrets
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          missing=()
+          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PWD MACOS_SIGN_IDENTITY \
+                      APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            {
+              echo "### Cannot sign: missing repository secrets"
+              printf -- '- `%s`\n' "${missing[@]}"
+              echo
+              echo "See [RELEASING.md](../blob/main/RELEASING.md) for how to create each one."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "Missing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+          echo "All signing secrets are present."
 
       - name: Import signing certificate
         env:
@@ -105,7 +132,7 @@ jobs:
     if: needs.release.outputs.update_site == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: sam-ayo/me
           token: ${{ secrets.SITE_REPO_TOKEN }}
