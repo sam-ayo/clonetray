@@ -1,3 +1,5 @@
+import os
+import shutil
 import subprocess
 from pathlib import Path
 import re
@@ -29,11 +31,24 @@ IDE_CHOICES = [
     "WebStorm",
 ]
 
-# Load configuration from config.yml
-CONFIG_FILE = Path(__file__).parent / "config.yml"
+# User config lives outside the install directory so brew reinstalls don't
+# wipe settings changed via the tray menu. The bundled config.yml shipped next
+# to this script is used as a one-time seed.
+BUNDLED_CONFIG_FILE = Path(__file__).parent / "config.yml"
+USER_CONFIG_DIR = Path(
+    os.environ.get(
+        "CLONETRAY_CONFIG_DIR",
+        str(Path.home() / "Library" / "Application Support" / "CloneTray"),
+    )
+)
+CONFIG_FILE = USER_CONFIG_DIR / "config.yml"
 
 def load_config():
     try:
+        if not CONFIG_FILE.exists():
+            USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            if BUNDLED_CONFIG_FILE.exists():
+                shutil.copy(BUNDLED_CONFIG_FILE, CONFIG_FILE)
         with open(CONFIG_FILE, 'r') as file:
             config = yaml.safe_load(file) or {}
             return config
