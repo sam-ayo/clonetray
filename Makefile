@@ -59,10 +59,7 @@ notarize: dmg
 		echo '  SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" make notarize'; \
 		exit 1; \
 	fi
-	xcrun notarytool submit $(DMG) --keychain-profile $(NOTARY_PROFILE) --wait
-	xcrun stapler staple $(DMG)
-	spctl --assess --type open --context context:primary-signature -v $(DMG)
-	@echo "==> $(DMG) is notarized and stapled"
+	NOTARY_PROFILE=$(NOTARY_PROFILE) scripts/notarize.sh $(DMG)
 
 ## Regenerate Resources/AppIcon.icns
 icon:

@@ -1,0 +1,138 @@
+name: Release
+
+# Tag a release to publish it:  git tag v0.2.0 && git push origin v0.2.0
+# Or run manually from the Actions tab to build a version without tagging.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, e.g. 0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      update_site: ${{ steps.secrets.outputs.update_site }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "Building CloneTray $version"
+
+      # Job-level `if:` can't read secrets, so decide here and pass it on as an output.
+      - name: Check for website token
+        id: secrets
+        run: echo "update_site=${{ secrets.SITE_REPO_TOKEN != '' }}" >>"$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain"
+          keychain_pwd="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE" | base64 --decode >"$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$keychain_pwd" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pwd" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          # Lets codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_pwd" "$keychain" >/dev/null
+          security list-keychain -d user -s "$keychain" login.keychain
+
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Build, sign and notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          make notarize \
+            VERSION="${{ steps.version.outputs.version }}" \
+            SIGN_IDENTITY="${{ secrets.MACOS_SIGN_IDENTITY }}"
+
+      - name: Add a stable-named copy of the disk image
+        run: |
+          # Lets the website link to .../releases/latest/download/CloneTray.dmg forever.
+          cp "build/CloneTray-${{ steps.version.outputs.version }}.dmg" build/CloneTray.dmg
+          shasum -a 256 build/CloneTray*.dmg
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            gh release upload "v$version" \
+              "build/CloneTray-$version.dmg" build/CloneTray.dmg --clobber
+          else
+            gh release create "v$version" \
+              "build/CloneTray-$version.dmg" build/CloneTray.dmg \
+              --title "CloneTray $version" --generate-notes
+          fi
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
+
+  # Opens a PR against the website bumping the version shown on the projects page.
+  update-website:
+    needs: release
+    if: needs.release.outputs.update_site == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sam-ayo/me
+          token: ${{ secrets.SITE_REPO_TOKEN }}
+
+      - name: Bump CloneTray version
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.clonetray.version = $v' src/data/releases.json >releases.tmp
+          mv releases.tmp src/data/releases.json
+          git diff --stat
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.SITE_REPO_TOKEN }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          if git diff --quiet; then
+            echo "Website already shows v$VERSION, nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "clonetray-v$VERSION"
+          git commit -am "Update CloneTray to v$VERSION"
+          git push --force origin "clonetray-v$VERSION"
+          gh pr create --fill --head "clonetray-v$VERSION" \
+            --title "Update CloneTray to v$VERSION" \
+            --body "Automated from [clonetray v$VERSION](https://github.com/sam-ayo/clonetray/releases/tag/v$VERSION)." \
+            || gh pr edit "clonetray-v$VERSION" --title "Update CloneTray to v$VERSION"
