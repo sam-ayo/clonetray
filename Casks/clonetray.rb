@@ -1,7 +1,6 @@
 cask "clonetray" do
   version "0.2.0"
-  # Replace with the checksum `make dmg` prints for the released disk image.
-  sha256 :no_check
+  sha256 "c14683df86663de9b60384f39cee1fa49f3517541fa106ff561b2c45d9b7a5eb"
 
   url "https://github.com/sam-ayo/clonetray/releases/download/v#{version}/CloneTray-#{version}.dmg"
   name "CloneTray"
