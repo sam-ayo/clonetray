@@ -1,0 +1,45 @@
+# Checkpoint configuration.
+# preset: starter (warn only) | standard (block on bugs and security) | strict (block on everything)
+# Set checks.<id>.mode to block, warn, or off to change one check.
+# Notes from setup:
+#   - The root Swift project: no tests found. The tests check is off until the project has tests.
+#   - The root Swift project: the project needs macOS, so its job runs on macOS. A macOS runner costs more minutes than a Linux runner.
+#   - `legacy`: no linter found, so Checkpoint uses Ruff with its default rules.
+#   - `legacy`: no tests found. The tests check is off until the project has tests.
+#   - `legacy`: the project needs macOS, so its job runs on macOS. A macOS runner costs more minutes than a Linux runner.
+version: 1
+preset: standard
+baseline: .checkpoint/baseline.json
+checks: {}
+thresholds:
+  complexity:
+    cyclomatic: 20
+    functionLines: 100
+  duplication:
+    minTokens: 70
+  coverage:
+    changedLines: 80
+  prSize:
+    maxChangedLines: 800
+    maxFiles: 40
+    maxAreas: 4
+  packages:
+    minAgeDays: 30
+    minWeeklyDownloads: 1000
+licenses:
+  allow:
+    - 0BSD
+    - Apache-2.0
+    - BlueOak-1.0.0
+    - BSD-2-Clause
+    - BSD-3-Clause
+    - CC0-1.0
+    - CC-BY-4.0
+    - ISC
+    - MIT
+    - MPL-2.0
+    - PSF-2.0
+    - Python-2.0
+    - Unlicense
+    - Zlib
+ignore: []
