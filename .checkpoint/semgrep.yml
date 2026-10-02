@@ -1,0 +1,86 @@
+rules:
+  - id: async-foreach
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      forEach does not wait for an async callback, so errors are lost and the work can finish after the function returns.
+      Use "for...of" with "await", or "await Promise.all(items.map(...))".
+    metadata: { category: correctness }
+    pattern-either:
+      - pattern: $X.forEach(async (...) => { ... })
+      - pattern: $X.forEach(async function (...) { ... })
+
+  - id: async-promise-executor
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      An async Promise executor does not reject when it throws, so the error is lost.
+      Make the function async and remove the "new Promise" wrapper.
+    metadata: { category: correctness }
+    pattern-either:
+      - pattern: new Promise(async (...) => { ... })
+      - pattern: new Promise(async function (...) { ... })
+
+  - id: compare-to-nan
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: A comparison with NaN is always false. Use Number.isNaN().
+    metadata: { category: correctness }
+    pattern-either:
+      - pattern: $X === NaN
+      - pattern: $X !== NaN
+      - pattern: $X == NaN
+      - pattern: $X != NaN
+
+  - id: empty-catch
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The catch block is empty, so the error is lost. Handle the error, log it, or add a comment that tells why it is safe to ignore.
+    metadata: { category: correctness }
+    pattern: |
+      try { ... } catch ($E) {}
+
+  - id: bare-except-pass
+    languages: [python]
+    severity: ERROR
+    message: >-
+      "except: pass" catches every exception, including KeyboardInterrupt and SystemExit, and hides it.
+      Catch a specific exception type and handle it.
+    metadata: { category: correctness }
+    pattern-either:
+      - pattern: |
+          try:
+              ...
+          except:
+              pass
+      - pattern: |
+          try:
+              ...
+          except BaseException:
+              pass
+
+  - id: mutable-default-argument
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A mutable default argument is shared by all calls, so a change in one call shows in the next call.
+      Use None as the default and make the object in the function.
+    metadata: { category: correctness }
+    pattern-either:
+      - pattern: |
+          def $F(..., $A=[], ...):
+              ...
+      - pattern: |
+          def $F(..., $A={}, ...):
+              ...
+      - pattern: |
+          def $F(..., $A=set(), ...):
+              ...
+
+  - id: assert-tuple
+    languages: [python]
+    severity: ERROR
+    message: An assert on a tuple is always true. Remove the parentheses.
+    metadata: { category: correctness }
+    pattern: assert ($A, $B)
